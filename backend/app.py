@@ -47,7 +47,7 @@ app.config.update(
     MAX_CONTENT_LENGTH=300 * 1024 * 1024,  # 300MB — generous for phone-exported video clips
 )
 
-VIDEOS_DIR = SITE_DIR / "videos"
+VIDEOS_DIR = DATA_DIR / "videos"
 VIDEOS_DIR.mkdir(exist_ok=True)
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "m4v", "webm"}
 
