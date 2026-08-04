@@ -706,10 +706,36 @@ def order_ship(order_id):
     return jsonify({"ok": True, **label})
 
 
+def _maybe_reset_admin_password():
+    """One-time-use ops helper: if RB_ADMIN_RESET_PASS is set in the environment,
+    upsert that password for RB_ADMIN_RESET_USER (default "admin"). Lets the store
+    owner recover access if the auto-generated INITIAL_ADMIN_CREDENTIALS.txt (which
+    lives on the ephemeral app filesystem, not the persistent disk) was lost across a
+    redeploy. Remove the env var after confirming login to stop it from clobbering any
+    password changed afterward.
+    """
+    reset_pass = os.environ.get("RB_ADMIN_RESET_PASS")
+    if not reset_pass:
+        return
+    reset_user = os.environ.get("RB_ADMIN_RESET_USER", "admin")
+    conn = sqlite3.connect(DB_PATH)
+    pw_hash = generate_password_hash(reset_pass, method="pbkdf2:sha256")
+    existing = conn.execute("SELECT id FROM admins WHERE username = ?", (reset_user,)).fetchone()
+    if existing:
+        conn.execute("UPDATE admins SET password_hash = ? WHERE username = ?", (pw_hash, reset_user))
+    else:
+        conn.execute(
+            "INSERT INTO admins (username, password_hash) VALUES (?, ?)", (reset_user, pw_hash)
+        )
+    conn.commit()
+    conn.close()
+
+
 # Runs on import too (not just `python app.py`), so gunicorn/Passenger — which import
 # this module and call `app` directly, never executing the block below — still get an
 # initialized database.
 init_db()
+_maybe_reset_admin_password()
 
 if __name__ == "__main__":
     host = os.environ.get("HOST", "127.0.0.1")
