@@ -223,6 +223,14 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
+# Videos live on the persistent disk (DATA_DIR), which sits outside static_folder
+# (the git checkout) in production — Flask's built-in static handler can't see it,
+# so uploaded videos need this explicit route to actually be servable.
+@app.route("/videos/<path:filename>")
+def serve_video(filename):
+    return send_from_directory(VIDEOS_DIR, filename)
+
+
 # ---- auth API -----------------------------------------------------------------
 @app.post("/api/login")
 def login():
