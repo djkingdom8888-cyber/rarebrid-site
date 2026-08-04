@@ -189,6 +189,18 @@ def init_db():
             f"username: {default_user}\npassword: {default_pass}\n"
             "Delete this file after you've noted the password (or change it — see README).\n"
         )
+
+    # One-time password reset path for environments (like a persistent-disk production
+    # deploy) where the auto-generated password above isn't readable after the fact.
+    # Only runs when RB_ADMIN_RESET_PASSWORD is explicitly set — safe to leave unset.
+    reset_pass = os.environ.get("RB_ADMIN_RESET_PASSWORD")
+    if reset_pass:
+        reset_user = os.environ.get("RB_ADMIN_USER", "admin")
+        conn.execute(
+            "UPDATE admins SET password_hash = ? WHERE username = ?",
+            (generate_password_hash(reset_pass, method="pbkdf2:sha256"), reset_user),
+        )
+        conn.commit()
     conn.close()
 
 
