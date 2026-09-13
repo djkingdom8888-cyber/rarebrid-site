@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Host Console | RARE BRïD APPAREL</title>
+<link rel="stylesheet" href="/css/live.css">
+</head>
+<body>
+
+<header class="live-header">
+  <div class="container nav-wrap">
+    <a href="/" class="logo">RARE<br><span class="red" style="color:var(--red);">BRïD.</span></a>
+    <a href="/live.html" class="back-link">&larr; Back to Live</a>
+  </div>
+</header>
+
+<section class="section">
+  <div class="container">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span class="status-badge scheduled" id="status-badge">…</span>
+        <h1 id="room-title" style="font-size:22px;">Loading… <span style="color:#999; font-weight:400; font-size:14px; text-transform:none; font-family:'Inter';">(host console)</span></h1>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button id="go-live-btn" class="btn btn-red">&#9654; Go Live</button>
+        <button id="end-live-btn" class="btn btn-outline" disabled>&#9632; End &amp; Save</button>
+      </div>
+    </div>
+    <p style="color:#999; font-size:13px; margin-bottom:20px;">
+      Share with viewers: <code id="viewer-link" style="background:#111; padding:3px 8px; border-radius:2px;">…</code>
+    </p>
+
+    <div class="live-grid">
+      <div>
+        <div class="live-stage">
+          <canvas id="compose-canvas" width="1280" height="720" style="width:100%; aspect-ratio:16/9; display:block; background:#000;"></canvas>
+          <video id="self-preview" autoplay playsinline muted style="display:none;"></video>
+        </div>
+        <div id="camera-requests" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="chat-panel">
+        <div class="chat-head">Live Chat</div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Say something…" maxlength="300">
+          <button id="chat-send" class="btn btn-red">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  window.LIVE_ROOM = new URLSearchParams(location.search).get('room') || '';
+</script>
+<script src="/js/live-host.js"></script>
+
+</body>
+</html>

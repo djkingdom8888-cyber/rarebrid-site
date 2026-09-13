@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live | RARE BRïD APPAREL</title>
+<link rel="stylesheet" href="/css/live.css">
+</head>
+<body>
+
+<header class="live-header">
+  <div class="container nav-wrap">
+    <a href="/" class="logo">RARE<br><span class="red" style="color:var(--red);">BRïD.</span></a>
+    <a href="/live.html" class="back-link">&larr; Back to Live</a>
+  </div>
+</header>
+
+<section class="section">
+  <div class="container">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+      <span class="status-badge scheduled" id="status-badge">…</span>
+      <h1 id="room-title" style="font-size:22px;">Loading…</h1>
+    </div>
+
+    <div class="live-grid">
+      <div>
+        <div class="live-stage">
+          <video id="host-video" autoplay playsinline></video>
+        </div>
+
+        <div id="join-camera-box" style="margin-top:16px;">
+          <button id="request-camera-btn" class="btn btn-outline">&#127909; Ask to join on camera</button>
+          <span id="camera-status" style="margin-left:10px; font-size:13px; color:#999;"></span>
+        </div>
+      </div>
+
+      <div class="chat-panel">
+        <div class="chat-head">Live Chat</div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Say something…" maxlength="300">
+          <button id="chat-send" class="btn btn-red">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="name-modal">
+  <div class="name-modal-box">
+    <h3>What should we call you?</h3>
+    <p>Shown in chat and if you join on camera.</p>
+    <div class="inline-field">
+      <input id="name-input" type="text" placeholder="Your name" maxlength="40">
+      <button id="name-submit" class="btn btn-red">Join</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  window.LIVE_ROOM = new URLSearchParams(location.search).get('room') || '';
+</script>
+<script src="/js/live-viewer.js"></script>
+
+</body>
+</html>

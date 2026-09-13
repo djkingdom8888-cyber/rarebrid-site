@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Replay | RARE BRïD APPAREL</title>
+<link rel="stylesheet" href="/css/live.css">
+</head>
+<body>
+
+<header class="live-header">
+  <div class="container nav-wrap">
+    <a href="/" class="logo">RARE<br><span class="red" style="color:var(--red);">BRïD.</span></a>
+    <a href="/live.html" class="back-link">&larr; Back to Live</a>
+  </div>
+</header>
+
+<section class="section">
+  <div class="container">
+    <div class="player-shell" style="margin-bottom:24px;">
+      <video id="replayVideo" controls></video>
+    </div>
+    <span class="eyebrow">Replay</span>
+    <h1 id="replayTitle" style="margin-top:14px; font-size:clamp(22px,3.2vw,32px);">Loading…</h1>
+    <p id="replayMeta" style="margin-top:10px; color:#999;"></p>
+  </div>
+</section>
+
+<script>
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  }
+  const room = new URLSearchParams(location.search).get('room');
+  (async function(){
+    if (!room) { document.getElementById('replayTitle').textContent = 'No replay specified.'; return; }
+    const res = await fetch(`/api/live-sessions/${encodeURIComponent(room)}`);
+    if (!res.ok) { document.getElementById('replayTitle').textContent = 'Replay not found.'; return; }
+    const s = await res.json();
+    if (!s.recording_path) { document.getElementById('replayTitle').textContent = 'No replay saved for this session yet.'; return; }
+    document.getElementById('replayVideo').src = '/' + s.recording_path;
+    document.getElementById('replayTitle').textContent = s.title;
+    document.getElementById('replayMeta').textContent = `Hosted by ${s.host_name} · Originally aired ${s.started_at || ''}`;
+  })();
+</script>
+
+</body>
+</html>

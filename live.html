@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live | RARE BRïD APPAREL</title>
+<link rel="stylesheet" href="/css/live.css">
+</head>
+<body>
+
+<header class="live-header">
+  <div class="container nav-wrap">
+    <a href="/" class="logo">RARE<br><span class="red" style="color:var(--red);">BRïD.</span></a>
+    <a href="/" class="back-link">&larr; Back to the store</a>
+  </div>
+</header>
+
+<section class="section">
+  <div class="container">
+    <span class="eyebrow">Live</span>
+    <div class="section-head">
+      <h2>Rare BRïD Live — Streams &amp; Cyphers</h2>
+    </div>
+    <p style="color:#999; font-size:14px; max-width:640px; margin-bottom:36px;">
+      Real talk, real cyphers, real culture — live, with chat and camera guests. Catch it live, or run back the replay.
+    </p>
+
+    <h3 style="margin-bottom:16px; color:var(--red); font-size:20px;">&#128308; Live Now</h3>
+    <div id="liveNowGrid" class="card-grid" style="margin-bottom:48px;">
+      <p class="empty-note">Loading…</p>
+    </div>
+
+    <h3 style="margin-bottom:16px; font-size:20px;">Scheduled</h3>
+    <div id="scheduledGrid" class="card-grid" style="margin-bottom:48px;"></div>
+
+    <h3 style="margin-bottom:16px; font-size:20px;">Replays</h3>
+    <div id="repGrid" class="card-grid"></div>
+  </div>
+</section>
+
+<script>
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  }
+
+  function cardLive(s){
+    return `<a class="media-card" href="/live-room.html?room=${encodeURIComponent(s.room_code)}">
+      <div class="thumb"><span class="badge-kind" style="background:var(--red);">&#9679; LIVE</span>&#128225;</div>
+      <div class="body"><h3>${escapeHtml(s.title)}</h3><p>Hosted by ${escapeHtml(s.host_name)}</p></div>
+    </a>`;
+  }
+  function cardScheduled(s){
+    return `<div class="media-card">
+      <div class="thumb"><span class="badge-kind">Scheduled</span>&#128197;</div>
+      <div class="body"><h3>${escapeHtml(s.title)}</h3><p>Hosted by ${escapeHtml(s.host_name)}</p></div>
+    </div>`;
+  }
+  function cardReplay(s){
+    return `<a class="media-card" href="/live-replay.html?room=${encodeURIComponent(s.room_code)}">
+      <div class="thumb"><span class="badge-kind">Replay</span>&#9654;</div>
+      <div class="body"><h3>${escapeHtml(s.title)}</h3><p>Hosted by ${escapeHtml(s.host_name)}</p></div>
+    </a>`;
+  }
+
+  async function load(){
+    const res = await fetch('/api/live-sessions');
+    const rows = res.ok ? await res.json() : [];
+
+    const liveNow = rows.filter(s => s.status === 'live');
+    const scheduled = rows.filter(s => s.status === 'scheduled');
+    const replays = rows.filter(s => s.status === 'ended' && s.recording_path);
+
+    document.getElementById('liveNowGrid').innerHTML = liveNow.length
+      ? liveNow.map(cardLive).join('')
+      : `<p class="empty-note">Nothing live right now — check back soon.</p>`;
+
+    document.getElementById('scheduledGrid').innerHTML = scheduled.length
+      ? scheduled.map(cardScheduled).join('')
+      : `<p class="empty-note">Nothing scheduled yet.</p>`;
+
+    document.getElementById('repGrid').innerHTML = replays.length
+      ? replays.map(cardReplay).join('')
+      : `<p class="empty-note">No replays available yet.</p>`;
+  }
+  load();
+</script>
+
+</body>
+</html>

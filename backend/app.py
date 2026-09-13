@@ -9,6 +9,7 @@ from pathlib import Path
 import stripe
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, session, send_from_directory
+from flask_socketio import SocketIO, join_room, emit
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
@@ -50,6 +51,10 @@ app.config.update(
 VIDEOS_DIR = DATA_DIR / "videos"
 VIDEOS_DIR.mkdir(exist_ok=True)
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "m4v", "webm"}
+
+# threading async_mode needs no extra dependency (eventlet/gevent) beyond flask-socketio
+# itself, matching the reference Msanii Media implementation this was ported from.
+socketio = SocketIO(app, async_mode="threading", max_http_buffer_size=300 * 1024 * 1024)
 
 # ---- very small brute-force guard on /api/login -------------------------
 _login_attempts = {}  # ip -> (count, first_attempt_ts)
@@ -169,6 +174,40 @@ def init_db():
             shipping_label_url TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        -- Live streaming: a sibling capability to the tracks/video feature above.
+        -- One row per broadcast; room_code is the public/shareable slug used in
+        -- /live-room.html and /live-host.html URLs.
+        CREATE TABLE IF NOT EXISTS live_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            host_name TEXT NOT NULL DEFAULT 'Rare BRïD',
+            room_code TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            recording_path TEXT NOT NULL DEFAULT '',
+            started_at TEXT,
+            ended_at TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            live_session_id TEXT NOT NULL REFERENCES live_sessions(id),
+            sender_name TEXT NOT NULL,
+            message TEXT NOT NULL,
+            sent_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS camera_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            live_session_id TEXT NOT NULL REFERENCES live_sessions(id),
+            viewer_name TEXT NOT NULL,
+            socket_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            requested_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         """
     )
     conn.commit()
@@ -215,6 +254,120 @@ def login_required(fn):
         return fn(*args, **kwargs)
 
     return wrapper
+
+
+# ---- live streaming: data access (mirrors the tracks/apparel query style above) ----
+def create_live_session(title, host_name):
+    room_code = secrets.token_urlsafe(6).replace("_", "").replace("-", "")[:8]
+    new_id = f"live-{secrets.token_hex(4)}"
+    conn = get_db()
+    next_order = conn.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM live_sessions").fetchone()[0]
+    conn.execute(
+        "INSERT INTO live_sessions (id, title, host_name, room_code, sort_order) VALUES (?,?,?,?,?)",
+        (new_id, title, host_name or "Rare BRïD", room_code, next_order),
+    )
+    conn.commit()
+    conn.close()
+    return new_id, room_code
+
+
+def get_live_session_by_room(room_code):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM live_sessions WHERE room_code = ?", (room_code,)).fetchone()
+    conn.close()
+    return row
+
+
+def get_live_session(session_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM live_sessions WHERE id = ?", (session_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def list_live_sessions(status=None, include_inactive=False):
+    conn = get_db()
+    q = "SELECT * FROM live_sessions WHERE 1=1"
+    params = []
+    if status:
+        q += " AND status = ?"
+        params.append(status)
+    if not include_inactive:
+        q += " AND active = 1"
+    q += " ORDER BY sort_order DESC"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return rows
+
+
+def set_live_status(session_id, status):
+    conn = get_db()
+    if status == "live":
+        conn.execute(
+            "UPDATE live_sessions SET status = ?, started_at = datetime('now') WHERE id = ?",
+            (status, session_id),
+        )
+    elif status == "ended":
+        conn.execute(
+            "UPDATE live_sessions SET status = ?, ended_at = datetime('now') WHERE id = ?",
+            (status, session_id),
+        )
+    else:
+        conn.execute("UPDATE live_sessions SET status = ? WHERE id = ?", (status, session_id))
+    conn.commit()
+    conn.close()
+
+
+def set_live_recording(session_id, recording_path):
+    conn = get_db()
+    conn.execute("UPDATE live_sessions SET recording_path = ? WHERE id = ?", (recording_path, session_id))
+    conn.commit()
+    conn.close()
+
+
+def add_chat_message(session_id, sender_name, message):
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO chat_messages (live_session_id, sender_name, message) VALUES (?,?,?)",
+        (session_id, sender_name, message),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def list_chat_messages(session_id):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM chat_messages WHERE live_session_id = ? ORDER BY id ASC", (session_id,)
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def create_camera_request(session_id, viewer_name, socket_id):
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO camera_requests (live_session_id, viewer_name, socket_id) VALUES (?,?,?)",
+        (session_id, viewer_name, socket_id),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def get_camera_request(request_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM camera_requests WHERE id = ?", (request_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def set_camera_request_status(request_id, status):
+    conn = get_db()
+    conn.execute("UPDATE camera_requests SET status = ? WHERE id = ?", (status, request_id))
+    conn.commit()
+    conn.close()
 
 
 # ---- static site -------------------------------------------------------------
@@ -384,6 +537,68 @@ def upload_track():
 @app.errorhandler(413)
 def too_large(e):
     return jsonify({"error": "That file is too large (300MB limit)."}), 413
+
+
+# ---- live streaming API (sibling capability to tracks/video above) -----------------
+# Real-time chat + WebRTC signaling is handled over Socket.IO further down this file;
+# these are the plain REST endpoints for listing/creating/managing sessions and for
+# handing the finished recording off to the same video storage tracks/upload uses.
+@app.get("/api/live-sessions")
+def list_live_sessions_api():
+    status = request.args.get("status")
+    rows = list_live_sessions(status=status)
+    return jsonify([dict(r) for r in rows])
+
+
+@app.get("/api/live-sessions/<room_code>")
+def get_live_session_api(room_code):
+    row = get_live_session_by_room(room_code)
+    if not row:
+        return jsonify({"error": "No live session with that link."}), 404
+    return jsonify(dict(row))
+
+
+@app.post("/api/live-sessions")
+@login_required
+def create_live_session_api():
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Give the session a title."}), 400
+    host_name = (data.get("host_name") or "").strip() or "Rare BRïD"
+    session_id, room_code = create_live_session(title, host_name)
+    return jsonify({"ok": True, "id": session_id, "room_code": room_code})
+
+
+@app.delete("/api/live-sessions/<session_id>")
+@login_required
+def delete_live_session_api(session_id):
+    conn = get_db()
+    conn.execute("UPDATE live_sessions SET active = 0 WHERE id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/live-sessions/<room_code>/upload-recording")
+def upload_live_recording(room_code):
+    live_session = get_live_session_by_room(room_code)
+    if not live_session:
+        return jsonify({"error": "No live session with that link."}), 404
+
+    file = request.files.get("recording")
+    if not file or not file.filename:
+        return jsonify({"error": "No recording uploaded."}), 400
+
+    # Same storage convention as /api/tracks/upload — lands in VIDEOS_DIR, servable
+    # from the existing /videos/<path:filename> route, no separate storage path.
+    filename = f"live-{room_code}-{secrets.token_hex(4)}.webm"
+    dest = VIDEOS_DIR / filename
+    file.save(dest)
+
+    recording_path = f"videos/{filename}"
+    set_live_recording(live_session["id"], recording_path)
+    return jsonify({"ok": True, "recording_path": recording_path})
 
 
 # ---- products API (digital) --------------------------------------------------------
@@ -751,6 +966,101 @@ def _maybe_reset_admin_password():
     conn.close()
 
 
+# ==================================================================
+# Socket.IO — live chat, WebRTC signaling relay, camera-join workflow
+# Pure signaling relay: the server never touches media, only forwards SDP/ICE
+# JSON between socket ids (see js/live-host.js and js/live-viewer.js).
+# ==================================================================
+
+@socketio.on("join_room")
+def on_join_room(data):
+    room_code = data.get("room")
+    role = data.get("role", "viewer")  # 'host' | 'viewer'
+    name = data.get("name", "Guest")
+    if not room_code:
+        return
+    join_room(room_code)
+    live_session = get_live_session_by_room(room_code)
+    if live_session:
+        history = [dict(m) for m in list_chat_messages(live_session["id"])]
+        emit("chat_history", {"messages": history})
+    emit("presence", {"role": role, "name": name, "sid": request.sid}, to=room_code, include_self=False)
+
+
+@socketio.on("chat_message")
+def on_chat_message(data):
+    room_code = data.get("room")
+    name = data.get("name", "Guest")
+    message = (data.get("message") or "").strip()
+    if not room_code or not message:
+        return
+    live_session = get_live_session_by_room(room_code)
+    if not live_session:
+        return
+    add_chat_message(live_session["id"], name, message)
+    emit("chat_message", {"name": name, "message": message}, to=room_code)
+
+
+@socketio.on("host_go_live")
+def on_host_go_live(data):
+    room_code = data.get("room")
+    live_session = get_live_session_by_room(room_code)
+    if not live_session:
+        return
+    set_live_status(live_session["id"], "live")
+    emit("live_status", {"status": "live"}, to=room_code)
+
+
+@socketio.on("host_end_live")
+def on_host_end_live(data):
+    room_code = data.get("room")
+    live_session = get_live_session_by_room(room_code)
+    if not live_session:
+        return
+    set_live_status(live_session["id"], "ended")
+    emit("live_status", {"status": "ended"}, to=room_code)
+
+
+@socketio.on("request_camera")
+def on_request_camera(data):
+    room_code = data.get("room")
+    name = data.get("name", "Guest")
+    live_session = get_live_session_by_room(room_code)
+    if not live_session:
+        return
+    req_id = create_camera_request(live_session["id"], name, request.sid)
+    emit("camera_request", {"request_id": req_id, "name": name, "socket_id": request.sid}, to=room_code)
+
+
+@socketio.on("respond_camera")
+def on_respond_camera(data):
+    room_code = data.get("room")
+    request_id = data.get("request_id")
+    approve = bool(data.get("approve"))
+    req = get_camera_request(request_id)
+    if not req:
+        return
+    set_camera_request_status(request_id, "approved" if approve else "denied")
+    emit(
+        "camera_response",
+        {"request_id": request_id, "approve": approve, "host_sid": request.sid},
+        to=req["socket_id"],
+    )
+    if approve:
+        emit("guest_joining", {"socket_id": req["socket_id"], "name": req["viewer_name"]}, to=room_code)
+
+
+# ---- WebRTC signaling relay (direct socket-to-socket, not room broadcast) ----
+@socketio.on("webrtc_signal")
+def on_webrtc_signal(data):
+    target_sid = data.get("to")
+    if not target_sid:
+        return
+    payload = dict(data)
+    payload["from"] = request.sid
+    emit("webrtc_signal", payload, to=target_sid)
+
+
 # Runs on import too (not just `python app.py`), so gunicorn/Passenger — which import
 # this module and call `app` directly, never executing the block below — still get an
 # initialized database.
@@ -760,4 +1070,4 @@ _maybe_reset_admin_password()
 if __name__ == "__main__":
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", 8844))
-    app.run(host=host, port=port, debug=False)
+    socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)

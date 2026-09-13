@@ -376,6 +376,48 @@
   .player-list .meta .a{color:#888; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;}
   .player-list .len{color:#666; font-size:11px;}
 
+  /* ---- Live streaming entry point + admin management ---- */
+  .live-entry{margin-bottom:24px;}
+  .live-entry-link{
+    display:inline-flex; align-items:center; gap:10px; background:#111; border:1px solid var(--red);
+    padding:12px 18px; font-family:'Bebas Neue'; letter-spacing:1px; font-size:16px; color:var(--white);
+    text-transform:uppercase; transition:0.2s;
+  }
+  .live-entry-link:hover{background:var(--red);}
+  .live-entry-link .live-dot{
+    width:9px; height:9px; border-radius:50%; background:var(--red); animation:pulse 1.4s infinite; flex-shrink:0;
+  }
+  .live-admin-panel{
+    display:none; flex-direction:column; gap:12px; background:#111; border:1px solid #262626;
+    padding:18px 20px; margin-bottom:24px;
+  }
+  .live-admin-panel.show{display:flex;}
+  .live-admin-panel h3{color:var(--gold); font-size:18px;}
+  .live-admin-form{display:flex; gap:10px; flex-wrap:wrap;}
+  .live-admin-form input{
+    flex:1; min-width:180px; background:#0a0a0a; border:1px solid #333; color:var(--white);
+    padding:10px 12px; font-size:12px; border-radius:2px; font-family:'Inter';
+  }
+  .live-admin-form input::placeholder{color:#666;}
+  .live-admin-form .btn{padding:10px 18px; font-size:11px; white-space:nowrap;}
+  .live-admin-list{list-style:none; display:flex; flex-direction:column; gap:8px;}
+  .live-admin-list li{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    background:#0a0a0a; border:1px solid #262626; padding:10px 14px; font-size:12.5px;
+  }
+  .live-admin-list .lal-title{font-weight:700; text-transform:uppercase;}
+  .live-admin-list .lal-status{
+    font-size:10px; font-weight:800; letter-spacing:1px; padding:2px 8px; border-radius:2px; text-transform:uppercase;
+  }
+  .live-admin-list .lal-status.scheduled{background:#333; color:#ccc;}
+  .live-admin-list .lal-status.live{background:var(--red); color:var(--white);}
+  .live-admin-list .lal-status.ended{background:var(--teal); color:var(--black);}
+  .live-admin-list .lal-links a{color:var(--teal); text-decoration:underline; margin-right:12px; font-size:11px;}
+  .live-admin-list .lal-del{
+    background:transparent; border:1px solid #444; color:#999; font-size:11px; padding:5px 9px; cursor:pointer; border-radius:2px;
+  }
+  .live-admin-list .lal-del:hover{border-color:var(--red); color:var(--red);}
+
   .admin-toggle{
     background:transparent; border:1px solid #444; color:#999; font-size:11px; font-weight:800;
     letter-spacing:1px; padding:7px 12px; cursor:pointer; text-transform:uppercase; border-radius:2px;
@@ -500,6 +542,7 @@
           <li><a href="#shop">Shop</a></li>
           <li><a href="#custom">Customize</a></li>
           <li><a href="#music">Music</a></li>
+          <li><a href="/live.html">Live</a></li>
           <li><a href="#about">Our Story</a></li>
         </ul>
       </nav>
@@ -563,6 +606,20 @@
           <button id="adminToggle" class="admin-toggle" type="button">🔒 ADMIN MODE</button>
           <a href="#" class="view-all">View All →</a>
         </div>
+      </div>
+
+      <div class="live-entry">
+        <a href="/live.html" class="live-entry-link"><span class="live-dot"></span> <span id="liveEntryLabel">RARE BRïD LIVE — see what's streaming</span></a>
+      </div>
+
+      <div class="live-admin-panel" id="liveAdminPanel">
+        <h3>🔴 Go Live — Start a New Session</h3>
+        <div class="live-admin-form">
+          <input type="text" id="liveTitleInput" placeholder="Session title (e.g. Friday Freestyle Cypher)">
+          <input type="text" id="liveHostInput" placeholder="Host name (optional)">
+          <button id="liveCreateBtn" class="btn btn-red" type="button">CREATE SESSION</button>
+        </div>
+        <ul class="live-admin-list" id="liveAdminList"></ul>
       </div>
 
       <div class="music-layout">
@@ -1143,6 +1200,76 @@
     wirePriceEdits(apparelGroups);
   }
 
+  // ---- Live streaming: entry-point status + admin session management ----
+  const liveEntryLabel = document.getElementById('liveEntryLabel');
+  const liveAdminPanel = document.getElementById('liveAdminPanel');
+  const liveAdminList  = document.getElementById('liveAdminList');
+  const liveTitleInput = document.getElementById('liveTitleInput');
+  const liveHostInput  = document.getElementById('liveHostInput');
+  const liveCreateBtn  = document.getElementById('liveCreateBtn');
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  }
+
+  async function refreshLiveEntryLabel(){
+    try {
+      const res = await fetch('/api/live-sessions?status=live');
+      const rows = res.ok ? await res.json() : [];
+      liveEntryLabel.textContent = rows.length
+        ? `🔴 LIVE NOW — ${rows[0].title}`
+        : "RARE BRïD LIVE — see what's streaming";
+    } catch (e) { /* leave default label */ }
+  }
+
+  async function loadLiveSessionsForAdmin(){
+    if (!isAdmin) return;
+    const res = await fetch('/api/live-sessions');
+    const rows = res.ok ? await res.json() : [];
+    if (!rows.length) {
+      liveAdminList.innerHTML = `<li style="justify-content:center; color:#666;">No live sessions yet — create one above.</li>`;
+      return;
+    }
+    liveAdminList.innerHTML = rows.map(s => `
+      <li data-id="${s.id}">
+        <span><span class="lal-title">${escapeHtml(s.title)}</span> — ${escapeHtml(s.host_name)}</span>
+        <span class="lal-status ${s.status}">${s.status}</span>
+        <span class="lal-links">
+          <a href="/live-host.html?room=${encodeURIComponent(s.room_code)}" target="_blank">Host console</a>
+          <a href="/live-room.html?room=${encodeURIComponent(s.room_code)}" target="_blank">Viewer link</a>
+        </span>
+        <button class="lal-del" type="button" data-id="${s.id}">Delist</button>
+      </li>`).join('');
+    liveAdminList.querySelectorAll('.lal-del').forEach(btn => {
+      btn.addEventListener('click', () => deleteLiveSession(btn.dataset.id));
+    });
+  }
+
+  async function createLiveSession(){
+    const title = liveTitleInput.value.trim();
+    if (!title) { alert('Give the session a title first.'); return; }
+    const res = await fetch('/api/live-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, host_name: liveHostInput.value.trim() })
+    });
+    if (res.status === 401) { alert('Your session expired — please log in again.'); setAdminMode(false); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || 'Could not create that session.'); return; }
+    liveTitleInput.value = ''; liveHostInput.value = '';
+    await loadLiveSessionsForAdmin();
+    window.open(`/live-host.html?room=${encodeURIComponent(data.room_code)}`, '_blank');
+  }
+  liveCreateBtn.addEventListener('click', createLiveSession);
+  liveTitleInput.addEventListener('keydown', e => { if (e.key === 'Enter') createLiveSession(); });
+
+  async function deleteLiveSession(id){
+    if (!confirm('Delist this live session? Viewers will no longer see it listed.')) return;
+    const res = await fetch(`/api/live-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (res.status === 401) { alert('Your session expired — please log in again.'); setAdminMode(false); return; }
+    await loadLiveSessionsForAdmin();
+  }
+
   // ---- Admin auth (real server session via httpOnly cookie) ----
   const musicSection = document.getElementById('music');
   const adminToggle = document.getElementById('adminToggle');
@@ -1158,6 +1285,7 @@
     musicSection.classList.toggle('admin-mode', on);
     apparelGroups.classList.toggle('admin-mode', on);
     uploadAdd.classList.toggle('show', on);
+    liveAdminPanel.classList.toggle('show', on);
     adminToggles.forEach(btn => {
       btn.classList.toggle('active', on);
       btn.textContent = on ? '🔓 LOG OUT' : '🔒 ADMIN LOGIN';
@@ -1165,6 +1293,7 @@
     renderList();
     loadProductsFromServer();
     loadApparelFromServer();
+    if (on) loadLiveSessionsForAdmin();
   }
 
   function openLogin(){
@@ -1235,6 +1364,7 @@
     const meRes = await fetch('/api/me');
     const me = await meRes.json().catch(() => ({ loggedIn: false }));
     setAdminMode(!!me.loggedIn);
+    refreshLiveEntryLabel();
   })();
 </script>
 </body>
