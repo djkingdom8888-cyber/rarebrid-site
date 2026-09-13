@@ -228,7 +228,7 @@ def init_db():
             (default_user, generate_password_hash(default_pass, method="pbkdf2:sha256")),
         )
         conn.commit()
-        (BASE_DIR / "INITIAL_ADMIN_CREDENTIALS.txt").write_text(
+        (DATA_DIR / "INITIAL_ADMIN_CREDENTIALS.txt").write_text(
             f"username: {default_user}\npassword: {default_pass}\n"
             "Delete this file after you've noted the password (or change it — see README).\n"
         )
@@ -949,9 +949,9 @@ def _maybe_reset_admin_password():
     """One-time-use ops helper: if RB_ADMIN_RESET_PASS is set in the environment,
     upsert that password for RB_ADMIN_RESET_USER (default "admin"). Lets the store
     owner recover access if the auto-generated INITIAL_ADMIN_CREDENTIALS.txt (which
-    lives on the ephemeral app filesystem, not the persistent disk) was lost across a
-    redeploy. Remove the env var after confirming login to stop it from clobbering any
-    password changed afterward.
+    now lives alongside the database under DATA_DIR, but may still have been deleted
+    or never noted) was lost. Remove the env var after confirming login to stop it
+    from clobbering any password changed afterward.
     """
     reset_pass = os.environ.get("RB_ADMIN_RESET_PASS")
     if not reset_pass:
