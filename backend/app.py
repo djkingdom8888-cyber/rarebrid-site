@@ -52,9 +52,13 @@ VIDEOS_DIR = DATA_DIR / "videos"
 VIDEOS_DIR.mkdir(exist_ok=True)
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "m4v", "webm"}
 
-# threading async_mode needs no extra dependency (eventlet/gevent) beyond flask-socketio
-# itself, matching the reference Msanii Media implementation this was ported from.
-socketio = SocketIO(app, async_mode="threading", max_http_buffer_size=300 * 1024 * 1024)
+# gevent async_mode is required in production: the Procfile runs gunicorn with the
+# GeventWebSocketWorker (single worker, in-process room state, no Redis message queue),
+# and "threading" async_mode does not correctly interoperate with gevent-websocket's
+# permessage-deflate handshake (confirmed locally: websocket transport fails with
+# "rsv is not implemented, yet" under threading mode). Matches the fix already applied
+# on the sister project Msanii Halisi. gevent is now a declared dependency (requirements.txt).
+socketio = SocketIO(app, async_mode="gevent", max_http_buffer_size=300 * 1024 * 1024)
 
 # ---- very small brute-force guard on /api/login -------------------------
 _login_attempts = {}  # ip -> (count, first_attempt_ts)
