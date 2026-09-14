@@ -413,10 +413,11 @@
   .live-admin-list .lal-status.live{background:var(--red); color:var(--white);}
   .live-admin-list .lal-status.ended{background:var(--teal); color:var(--black);}
   .live-admin-list .lal-links a{color:var(--teal); text-decoration:underline; margin-right:12px; font-size:11px;}
-  .live-admin-list .lal-del{
+  .live-admin-list .lal-del, .live-admin-list .lal-edit{
     background:transparent; border:1px solid #444; color:#999; font-size:11px; padding:5px 9px; cursor:pointer; border-radius:2px;
   }
   .live-admin-list .lal-del:hover{border-color:var(--red); color:var(--red);}
+  .live-admin-list .lal-edit:hover{border-color:var(--mango); color:var(--mango);}
 
   .admin-toggle{
     background:transparent; border:1px solid #444; color:#999; font-size:11px; font-weight:800;
@@ -466,6 +467,13 @@
   }
   .player-list .del-track:hover{border-color:var(--red); color:var(--red); background:rgba(255,46,99,0.1);}
   .music-section.admin-mode .player-list .del-track{display:flex;}
+  .player-list .edit-track{
+    display:none; background:transparent; border:1px solid #444; color:#999; width:22px; height:22px;
+    min-width:22px; border-radius:50%; cursor:pointer; font-size:10px; align-items:center; justify-content:center;
+    margin-left:8px;
+  }
+  .player-list .edit-track:hover{border-color:var(--mango); color:var(--mango); background:rgba(255,140,26,0.1);}
+  .music-section.admin-mode .player-list .edit-track{display:flex;}
   .track-play{
     width:52px; height:52px; min-width:52px; border-radius:50%; background:var(--teal); color:var(--black);
     display:flex; align-items:center; justify-content:center; font-size:16px; cursor:pointer; border:none;
@@ -801,7 +809,7 @@
         <span class="idx">${String(i+1).padStart(2,'0')}</span>
         <span class="meta">${PLATFORM_LABEL[t.type] ? `<span class="platform">${PLATFORM_LABEL[t.type]}</span>` : ''}<span class="t">${t.title}</span><br><span class="a">${t.artist}</span></span>
         <span class="len">${t.len}</span>
-        ${isAdmin ? `<button class="del-track" type="button" data-idx="${i}" title="Delete track">✕</button>` : ''}
+        ${isAdmin ? `<button class="edit-track" type="button" data-idx="${i}" title="Edit title/artist">✎</button><button class="del-track" type="button" data-idx="${i}" title="Delete track">✕</button>` : ''}
       </li>`).join('');
     listEl.querySelectorAll('li').forEach(li => {
       li.addEventListener('click', () => loadTrack(parseInt(li.dataset.idx)));
@@ -812,6 +820,30 @@
         deleteTrack(parseInt(btn.dataset.idx));
       });
     });
+    listEl.querySelectorAll('.edit-track').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        editTrack(parseInt(btn.dataset.idx));
+      });
+    });
+  }
+
+  async function editTrack(i){
+    const t = playlist[i];
+    const newTitle = prompt('Track title:', t.title);
+    if (newTitle === null) return;
+    const newArtist = prompt('Artist:', t.artist);
+    if (newArtist === null) return;
+    const res = await fetch(`/api/tracks/${encodeURIComponent(t.id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle.trim(), artist: newArtist.trim() })
+    });
+    if (res.status === 401) { alert('Your session expired — please log in again.'); setAdminMode(false); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || 'Could not update that track.'); return; }
+    t.title = newTitle.trim(); t.artist = newArtist.trim();
+    renderList();
+    if (i === current) { title.textContent = t.title; artist.textContent = t.artist; }
   }
 
   async function deleteTrack(i){
@@ -1238,11 +1270,32 @@
           <a href="/live-host.html?room=${encodeURIComponent(s.room_code)}" target="_blank">Host console</a>
           <a href="/live-room.html?room=${encodeURIComponent(s.room_code)}" target="_blank">Viewer link</a>
         </span>
-        <button class="lal-del" type="button" data-id="${s.id}">Delist</button>
+        <button class="lal-edit" type="button" data-id="${s.id}" title="Edit title">✎ Edit</button>
+        <button class="lal-del" type="button" data-id="${s.id}">Delete</button>
       </li>`).join('');
+    liveSessionsCache = rows;
     liveAdminList.querySelectorAll('.lal-del').forEach(btn => {
       btn.addEventListener('click', () => deleteLiveSession(btn.dataset.id));
     });
+    liveAdminList.querySelectorAll('.lal-edit').forEach(btn => {
+      btn.addEventListener('click', () => editLiveSession(btn.dataset.id));
+    });
+  }
+
+  let liveSessionsCache = [];
+
+  async function editLiveSession(id){
+    const current = liveSessionsCache.find(s => s.id === id);
+    const newTitle = prompt('Session title:', current ? current.title : '');
+    if (newTitle === null || !newTitle.trim()) return;
+    const res = await fetch(`/api/live-sessions/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle.trim() })
+    });
+    if (res.status === 401) { alert('Your session expired — please log in again.'); setAdminMode(false); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.error || 'Could not update that session.'); return; }
+    await loadLiveSessionsForAdmin();
   }
 
   async function createLiveSession(){
@@ -1264,9 +1317,14 @@
   liveTitleInput.addEventListener('keydown', e => { if (e.key === 'Enter') createLiveSession(); });
 
   async function deleteLiveSession(id){
-    if (!confirm('Delist this live session? Viewers will no longer see it listed.')) return;
+    const current = liveSessionsCache.find(s => s.id === id);
+    const warning = current && current.recording_path
+      ? `Delete "${current.title}"? This also permanently removes its saved recording.`
+      : `Delete "${current ? current.title : 'this session'}"?`;
+    if (!confirm(warning)) return;
     const res = await fetch(`/api/live-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (res.status === 401) { alert('Your session expired — please log in again.'); setAdminMode(false); return; }
+    if (!res.ok) { alert('Could not delete that session.'); return; }
     await loadLiveSessionsForAdmin();
   }
 
