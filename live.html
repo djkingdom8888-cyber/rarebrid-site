@@ -25,6 +25,8 @@
       Real talk, real cyphers, real culture — live, with chat and camera guests. Catch it live, or run back the replay.
     </p>
 
+    <div id="justWentLiveBanner" class="hidden" style="margin-bottom:20px; border:1px solid var(--red); color:var(--red); font-weight:700; padding:12px 16px; font-size:13.5px; letter-spacing:0.3px;"></div>
+
     <h3 style="margin-bottom:16px; color:var(--red); font-size:20px;">&#128308; Live Now</h3>
     <div id="liveNowGrid" class="card-grid" style="margin-bottom:48px;">
       <p class="empty-note">Loading…</p>
@@ -62,8 +64,29 @@
     </a>`;
   }
 
+  // This page has no other way to learn a session moved from "scheduled" to
+  // "live" (or ended) -- it's rendered once via fetch and otherwise sits
+  // static. Without polling, someone with this tab open when a host goes
+  // live gets zero indication. Poll a lightweight interval and re-render the
+  // three sections, plus flash a banner the moment something newly goes live.
+  const POLL_MS = 9000;
+  let knownStatus = {}; // room_code -> status, from the previous poll
+  let firstPoll = true;
+  let bannerTimer = null;
+
+  function showJustLiveBanner(titles){
+    const banner = document.getElementById('justWentLiveBanner');
+    if (!banner) return;
+    banner.textContent = titles.length === 1
+      ? `\u{1F534} "${titles[0]}" just went live!`
+      : `\u{1F534} ${titles.length} sessions just went live!`;
+    banner.classList.remove('hidden');
+    if (bannerTimer) clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => banner.classList.add('hidden'), 12000);
+  }
+
   async function load(){
-    const res = await fetch('/api/live-sessions');
+    const res = await fetch('/api/live-sessions', { cache: 'no-store' });
     const rows = res.ok ? await res.json() : [];
 
     const liveNow = rows.filter(s => s.status === 'live');
@@ -81,8 +104,21 @@
     document.getElementById('repGrid').innerHTML = replays.length
       ? replays.map(cardReplay).join('')
       : `<p class="empty-note">No replays available yet.</p>`;
+
+    const nextStatus = {};
+    const newlyLive = [];
+    rows.forEach(s => {
+      nextStatus[s.room_code] = s.status;
+      if (!firstPoll && s.status === 'live' && knownStatus[s.room_code] !== 'live') {
+        newlyLive.push(s.title);
+      }
+    });
+    if (newlyLive.length) showJustLiveBanner(newlyLive);
+    knownStatus = nextStatus;
+    firstPoll = false;
   }
   load();
+  setInterval(load, POLL_MS);
 </script>
 
 </body>

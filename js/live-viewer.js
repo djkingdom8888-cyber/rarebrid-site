@@ -11,6 +11,7 @@
   const socket = io();
 
   const hostVideo = document.getElementById("host-video");
+  const stageWaiting = document.getElementById("stage-waiting");
   const chatMessages = document.getElementById("chat-messages");
   const chatInput = document.getElementById("chat-input");
   const chatSend = document.getElementById("chat-send");
@@ -69,9 +70,49 @@
   });
   socket.on("chat_message", (data) => appendChatLine(data.name, data.message));
 
+  // ---------------- Waiting-for-host overlay ----------------
+  // The status badge alone isn't enough feedback: without this, a viewer can
+  // see the badge flip to "LIVE" while the video area still says "Waiting
+  // for the host..." (stale), or -- if WebRTC can never establish (no TURN
+  // server configured here, STUN only, so some NATs will simply fail) --
+  // sit on that same stale text forever with no error shown at all.
+  let watchdogTimer = null;
+  let gotTrack = false;
+
+  function clearWatchdog() {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+  }
+
+  function showOverlay(text, isError) {
+    if (!stageWaiting) return;
+    stageWaiting.textContent = text;
+    stageWaiting.classList.remove("hidden");
+    stageWaiting.classList.toggle("overlay-error", !!isError);
+  }
+
+  function hideOverlay() {
+    if (stageWaiting) stageWaiting.classList.add("hidden");
+  }
+
+  function armWatchdog() {
+    clearWatchdog();
+    gotTrack = false;
+    watchdogTimer = setTimeout(() => {
+      if (!gotTrack) {
+        showOverlay("Having trouble connecting to the stream — try refreshing.", true);
+      }
+    }, 15000);
+  }
+
   socket.on("live_status", (data) => {
     statusBadge.textContent = data.status.toUpperCase();
     statusBadge.className = "status-badge " + data.status;
+    if (data.status === "live") {
+      showOverlay("Host is live — connecting video…");
+    } else {
+      clearWatchdog();
+      showOverlay("Waiting for the host to go live…");
+    }
   });
 
   // ---------------- Receiving the host's broadcast ----------------
@@ -79,7 +120,21 @@
     if (data.kind === "broadcast" && data.type === "offer") {
       hostSid = data.from;
       broadcastPc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-      broadcastPc.ontrack = (e) => { hostVideo.srcObject = e.streams[0]; };
+      armWatchdog();
+      broadcastPc.ontrack = (e) => {
+        hostVideo.srcObject = e.streams[0];
+        gotTrack = true;
+        clearWatchdog();
+        hideOverlay();
+      };
+      broadcastPc.oniceconnectionstatechange = () => {
+        const state = broadcastPc.iceConnectionState;
+        if (state === "failed") {
+          gotTrack = false;
+          clearWatchdog();
+          showOverlay("Having trouble connecting to the stream — try refreshing.", true);
+        }
+      };
       broadcastPc.onicecandidate = (e) => {
         if (e.candidate) {
           socket.emit("webrtc_signal", { to: hostSid, kind: "broadcast", type: "ice", candidate: e.candidate });
@@ -203,5 +258,12 @@
     roomTitleEl.textContent = s.title;
     statusBadge.textContent = s.status.toUpperCase();
     statusBadge.className = "status-badge " + s.status;
+    // A viewer can land here directly (not just via the listing page) on an
+    // already-live or already-ended room -- match the overlay to that.
+    if (s.status === "live") {
+      showOverlay("Host is live — connecting video…");
+    } else if (s.status === "ended") {
+      showOverlay("This session has ended.");
+    }
   })();
 })();
