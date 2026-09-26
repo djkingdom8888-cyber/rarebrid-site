@@ -145,6 +145,9 @@
     } else {
       clearWatchdog();
       showOverlay("Waiting for the host to go live…");
+      // Host ended (or hasn't started) the session -- nothing left to share,
+      // so stop holding the phone's screen awake.
+      releaseWakeLock();
     }
   });
 
@@ -195,6 +198,42 @@
     }
   });
 
+  // iOS Safari (and most mobile browsers) will dim then lock the screen on
+  // its normal auto-lock timer even while a page is actively using the
+  // camera -- once the screen locks, WebKit suspends the page and the
+  // camera stream/WebRTC connection dies with it. This is exactly what "the
+  // camera times off after 5 seconds and goes blank" was: nothing in our
+  // signaling broke, the PHONE went to sleep out from under it. The fix is
+  // the standard Screen Wake Lock API (supported iOS Safari 16.4+): hold a
+  // lock for as long as the person is sharing their camera (pending
+  // approval OR already approved), release it the moment they stop sharing
+  // for any reason. A wake lock is auto-released by the browser whenever
+  // the tab is backgrounded/hidden, so it must be explicitly re-acquired on
+  // visibilitychange if we're still supposed to be holding it.
+  let wakeLock = null;
+  let wantWakeLock = false;
+
+  async function acquireWakeLock() {
+    wantWakeLock = true;
+    if (!("wakeLock" in navigator) || wakeLock) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (e) {
+      // Not supported, or denied (e.g. Low Power Mode) -- nothing else we
+      // can do client-side; the camera still works, it just may sleep.
+    }
+  }
+
+  function releaseWakeLock() {
+    wantWakeLock = false;
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && wantWakeLock) acquireWakeLock();
+  });
+
   // ---------------- Asking to join on camera ----------------
   requestBtn.onclick = async () => {
     requestBtn.disabled = true;
@@ -209,6 +248,7 @@
       requestBtn.disabled = false;
       return;
     }
+    acquireWakeLock();
     cameraStatus.textContent = "Connecting so the host can preview you…";
     awaitingCameraApproval = true;
     startGuestConnection();
@@ -219,6 +259,7 @@
     if (!data.approve) {
       cameraStatus.textContent = "The host declined your request to join.";
       requestBtn.disabled = false;
+      releaseWakeLock();
       if (guestPc) { try { guestPc.close(); } catch (e) { /* already closed */ } guestPc = null; }
       if (localGuestStream) { localGuestStream.getTracks().forEach((t) => t.stop()); localGuestStream = null; }
       return;
